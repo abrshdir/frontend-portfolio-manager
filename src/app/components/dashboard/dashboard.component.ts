@@ -1,6 +1,8 @@
-import { Component } from '@angular/core';
+import { AfterViewInit, Component, OnInit, ViewChild } from '@angular/core';
+import { ChartService } from '../../services/chart.service';
 import { CommonModule } from '@angular/common';
 import { TradingViewChartComponent } from '../trading-view-chart/trading-view-chart.component';
+import { RealtimeService } from '../../services/realtime.service';
 
 @Component({
   selector: 'app-dashboard',
@@ -15,9 +17,20 @@ import { TradingViewChartComponent } from '../trading-view-chart/trading-view-ch
       </div>
 
       <!-- Price Chart -->
-      <div class="bg-gray-800/50 p-6 rounded-xl">
-        <h2 class="text-xl font-semibold mb-4">APT Price</h2>
-        <app-trading-view-chart></app-trading-view-chart> <!-- Use the new component -->
+       <!-- Add to template section -->
+      <div *ngIf="showChart" class="bg-gray-800/50 p-6 rounded-xl relative">
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-xl font-semibold">APT Price</h2>
+          <button (click)="closeChart()" class="text-gray-400 hover:text-white transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <app-trading-view-chart 
+          (mouseenter)="resetTimer()"
+          (chartActivated)="showChart = true; resetTimer()">
+        </app-trading-view-chart>
       </div>
 
       <!-- Transaction History -->
@@ -49,7 +62,34 @@ import { TradingViewChartComponent } from '../trading-view-chart/trading-view-ch
     </div>
   `
 })
-export class DashboardComponent {
+export class DashboardComponent implements AfterViewInit, OnInit {
+  // Add {static: false} and safe navigation operator
+  @ViewChild(TradingViewChartComponent, {static: false}) chartComponent?: TradingViewChartComponent;
+  constructor(private chartService: ChartService) {}
+  ngAfterViewInit() {
+    // Add null check and setTimeout to ensure component exists
+    setTimeout(() => {
+      if (this.chartComponent) {
+        this.chartComponent.chartActivated.subscribe(() => {
+          this.showChart = true;
+          this.resetTimer();
+        });
+      }
+    }, 0);
+    
+    this.startTimer();
+  }
+
+  ngOnInit() {
+    this.chartService.toolCallComplete$.subscribe(result => {
+      if (result.action === 'update_chart') {
+        this.showChart = true;
+        this.resetTimer();
+      }
+    });
+  }
+
+
   transactions = [
     { type: 'Received', amount: 1.5, date: '2024-01-20' },
     { type: 'Sent', amount: -0.5, date: '2024-01-19' }
@@ -59,4 +99,30 @@ export class DashboardComponent {
     { name: 'Alice', address: '0x1234...5678' },
     { name: 'Bob', address: '0x8765...4321' }
   ];
+
+  showChart = false;
+  timerId: any;
+  selectedCoin = 'APT'; // Default coin
+
+
+  startTimer() {
+    this.timerId = setTimeout(() => {
+      this.showChart = false;
+    }, 10 * 60 * 1000); // 10 minutes
+  }
+
+  resetTimer() {
+    clearTimeout(this.timerId);
+    this.startTimer();
+  }
+
+  closeChart() {
+    clearTimeout(this.timerId);
+    this.showChart = false;
+  }
+
+  // Add this to make permanent
+  keepChartVisible() {
+    clearTimeout(this.timerId);
+  }
 }

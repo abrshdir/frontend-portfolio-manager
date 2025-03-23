@@ -4,6 +4,10 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { BehaviorSubject, Observable } from 'rxjs';
 import { trigger, state, style, animate, transition } from '@angular/animations';
+import { TradingViewChartComponent } from '../trading-view-chart/trading-view-chart.component';
+import { ErrorHandlerService } from '../../services/error-handler.service';
+import { ChartService } from '../../services/chart.service';
+import { ToolCallService } from '../../services/tool-call.service';
 
 @Component({
     selector: 'app-transcription',
@@ -26,6 +30,8 @@ import { trigger, state, style, animate, transition } from '@angular/animations'
     ]
 })
 export class TranscriptionComponent implements OnInit, OnDestroy {
+    // Add this property
+    @ViewChild(TradingViewChartComponent) tradingViewChart!: TradingViewChartComponent;
     peerConnection: RTCPeerConnection | null = null;
     dataChannel: RTCDataChannel | null = null;
     audioElement: HTMLAudioElement | null = null;
@@ -38,7 +44,7 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
     // UI state properties
     private uiStateSubject = new BehaviorSubject<'idle' | 'listening' | 'processing' | 'speaking'>('idle');
     uiState$: Observable<'idle' | 'listening' | 'processing' | 'speaking'> = this.uiStateSubject.asObservable();
-
+    testMessage = '';
     // Transcription observable
     private transcriptionSubject = new BehaviorSubject<string>('Click the microphone icon to begin chatting...');
     transcription$: Observable<string> = this.transcriptionSubject.asObservable();
@@ -50,12 +56,12 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
     micPermissionGranted = false;
     showAddressInput = false;
     recipientAddress = '';
-
+    showChart = false;
     // Session information
     sessionInfo: any = null;
 
     @ViewChild('audioVisualizer') audioVisualizer!: ElementRef<HTMLCanvasElement>;
-    @ViewChild('audioVisualizer') canvasRef!: ElementRef<HTMLCanvasElement>;
+    @ViewChild('canvasRef') canvasRef!: ElementRef<HTMLCanvasElement>;
     @ViewChild('transcriptionContainer') transcriptionContainer!: ElementRef<HTMLDivElement>;
 
     private ctx!: CanvasRenderingContext2D;
@@ -67,12 +73,15 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
 
     isRecording: boolean = false;
     conversation = [
-        { type: 'assistant', text: 'Hello! How can I help you manage your crypto portfolio?' },
+        { type: 'assistant', text: 'Welcome to Ai realtime portfolio manager!' },
     ];
 
     constructor(
         private realtimeService: RealtimeService,
-        private ngZone: NgZone
+        private ngZone: NgZone,
+        private errorHandler: ErrorHandlerService,
+        private chartService: ChartService,  // Already injected
+        private toolCallService: ToolCallService
     ) { }
 
     // Getter and setter for uiState to maintain compatibility
@@ -120,7 +129,7 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
 
     private resizeCanvas() {
         if (!this.canvasRef || !this.canvasRef.nativeElement) return;
-        
+
         const canvas = this.canvasRef.nativeElement;
         const dpr = window.devicePixelRatio || 1;
         const rect = canvas.getBoundingClientRect();
@@ -136,7 +145,7 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
 
     private drawInitialCircles() {
         if (!this.canvasRef || !this.canvasRef.nativeElement || !this.ctx) return;
-        
+
         const canvas = this.canvasRef.nativeElement;
         const width = canvas.width;
         const height = canvas.height;
@@ -183,7 +192,7 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
     }
 
     private draw() {
-        if (!this.analyser || !this.isRecording) return;
+        if (!this.analyser || !this.isRecording || !this.canvasRef?.nativeElement) return;
 
         const canvas = this.canvasRef.nativeElement;
         const width = canvas.width;
@@ -238,7 +247,7 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
 
         try {
             // First check microphone access
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            await navigator.mediaDevices.getUserMedia({ audio: true });
             this.micPermissionGranted = true;
 
             // Fetch ephemeral key from backend
@@ -300,11 +309,25 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
         }
     }
 
+    // Modify the existing handleRealtimeEvent
     handleRealtimeEvent(realtimeEvent: any) {
         try {
             // Handle different event types based on their type
             switch (realtimeEvent.type) {
                 case 'session.created':
+                    this.conversation.push(
+                        { type: 'assistant', text: 'Hello! How can I help you manage your crypto portfolio?' },
+                    )
+                    break;
+
+                case 'conversation.item.input_audio_transcription.completed':
+                    this.transcription += realtimeEvent.transcription;
+                    this.conversation.push({
+                        type: 'user',
+                        text: this.transcription
+                    });
+                    break;
+
                 case 'session.updated':
                     this.sessionInfo = realtimeEvent.session;
                     break;
@@ -313,18 +336,6 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
                     this.uiState = 'listening';
                     // Clear the transcription when user starts speaking
                     this.transcription = '';
-                    break;
-
-                case 'input_audio_buffer.speech_stopped':
-                    this.uiState = 'processing';
-                    // When user stops speaking, finalize their message in the conversation
-                    if (this.transcription.trim() !== '' &&
-                        (this.conversation.length === 0 || this.conversation[this.conversation.length - 1].type !== 'user')) {
-                        this.conversation.push({
-                            type: 'user',
-                            text: this.transcription
-                        });
-                    }
                     break;
 
                 case 'response.created':
@@ -342,7 +353,7 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
 
                 case 'output_audio_buffer.stopped':
                     // Create a new conversation entry when audio output stops
-                    if (this.conversation.length > 0 && 
+                    if (this.conversation.length > 0 &&
                         this.conversation[this.conversation.length - 1].type === 'assistant' &&
                         this.transcription.trim() !== '') {
                         // Store the current transcription text
@@ -366,11 +377,84 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
                     this.transcribe(realtimeEvent);
                     break;
 
+                case 'response.done':
+                    // Handle function calls from the response
+                    realtimeEvent.response.output?.forEach(async (outputItem: any) => {
+                        if (outputItem.type === 'function_call') {
+                            try {
+                                const args = JSON.parse(outputItem.arguments);
+                                await this.handleFunctionCall(
+                                    outputItem.name,
+                                    args,
+                                    outputItem.call_id
+                                );
+                            } catch (error) {
+                                console.error('Error handling function call:', error);
+                            }
+                        }
+                    });
+                    break;
+
                 default:
                     console.log('Unhandled event type:', realtimeEvent.type);
             }
         } catch (error) {
             console.error('Error handling realtime event:', error);
+        }
+    }
+
+
+    // Add new method to handle function calls
+    // Update the handleFunctionCall method to use the data channel directly
+    private async handleFunctionCall(name: string, args: any, callId: string) {
+        try {
+            const result = await this.realtimeService.callFunction(name, args, callId).toPromise();
+
+            // Notify chart service if this is a chart update
+            if (result && (result as any).action === 'update_chart') {
+                this.chartService.completeToolCall(result);
+            }
+
+            // Send function result directly through the data channel
+            if (this.dataChannel && this.dataChannel.readyState === 'open') {
+                const functionResultEvent = {
+                    type: "session.update",
+                    function_call: {
+                        id: callId,
+                        name: name,
+                        content: JSON.stringify(result)
+                    }
+                };
+
+                this.dataChannel.send(JSON.stringify(functionResultEvent));
+                console.log('Function result sent via data channel:', functionResultEvent);
+
+                // Continue the conversation after sending the result
+                this.dataChannel.send(JSON.stringify({
+                    type: "response.create"
+                }));
+            } else {
+                console.error('Data channel not available or not open');
+            }
+        } catch (error: any) {
+            console.error('Function call failed:', error);
+
+            // Send error result through data channel
+            if (this.dataChannel && this.dataChannel.readyState === 'open') {
+                const errorResultEvent = {
+                    type: "session.update",
+                    function_call: {
+                        id: callId,
+                        name: name,
+                        content: JSON.stringify({
+                            status: 'error',
+                            message: error.message || 'Function execution failed'
+                        })
+                    }
+                };
+
+                this.dataChannel.send(JSON.stringify(errorResultEvent));
+            }
         }
     }
 
@@ -428,18 +512,19 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
     setupAudioVisualizer(stream: MediaStream): void {
         this.ngZone.runOutsideAngular(async () => {
             try {
-                this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                this.mediaStream = stream;  // Use the provided stream from peer connection
                 this.audioContext = new AudioContext();
                 this.analyser = this.audioContext.createAnalyser();
 
                 const source = this.audioContext.createMediaStreamSource(this.mediaStream);
                 this.analyser.fftSize = 256;
                 source.connect(this.analyser);
-                this.isRecording = true;
 
-                this.ngZone.runOutsideAngular(() => {
-                    this.draw();
-                });
+                if (this.canvasRef?.nativeElement) {
+                    this.ngZone.runOutsideAngular(() => {
+                        this.draw();
+                    });
+                }
 
                 this.visualizerData = new Uint8Array(this.analyser.frequencyBinCount);
 
@@ -460,6 +545,7 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
             console.error('Microphone permission denied:', err);
         }
     }
+
 
     ngOnInit(): void {
         this.audioElement = document.createElement('audio');

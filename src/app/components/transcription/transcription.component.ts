@@ -428,7 +428,7 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
             // Send function result directly through the data channel
             if (this.dataChannel && this.dataChannel.readyState === 'open') {
                 const functionResultEvent = {
-                    type: "session.update",
+                    type: "conversation.item.create",
                     item: {
                         type: "function_call_output",
                         call_id: callId,
@@ -451,7 +451,7 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
             // Send error result through data channel
             if (this.dataChannel && this.dataChannel.readyState === 'open') {
                 const errorResultEvent = {
-                    type: "session.update",
+                    type: "conversation.item.create",
                     item: {
                         type: "function_call_output",
                         call_id: callId,

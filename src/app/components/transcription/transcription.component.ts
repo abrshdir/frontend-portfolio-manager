@@ -418,6 +418,11 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
             // Notify chart service if this is a chart update
             if (result && (result as any).action === 'update_chart') {
                 this.chartService.completeToolCall(result);
+            } else if (typeof result === 'number') {
+                this.chartService.completeToolCall({
+                    action: 'update_price',
+                    value: result
+                });
             }
 
             // Send function result directly through the data channel

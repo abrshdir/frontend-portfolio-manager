@@ -13,7 +13,7 @@ import { RealtimeService } from '../../services/realtime.service';
       <!-- Wallet Balance -->
       <div class="bg-gradient-to-r from-blue-500/20 to-purple-500/20 p-6 rounded-xl">
         <h2 class="text-xl font-semibold mb-2">Wallet Balance</h2>
-        <p class="text-3xl font-bold">0.00 APT</p>
+        <p class="text-3xl font-bold">\${{ currentPrice.toFixed(2) }}</p>
       </div>
 
       <!-- Price Chart -->
@@ -59,7 +59,6 @@ import { RealtimeService } from '../../services/realtime.service';
           </div>
         </div>
       </div>
-    </div>
   `
 })
 export class DashboardComponent implements AfterViewInit, OnInit {
@@ -80,11 +79,17 @@ export class DashboardComponent implements AfterViewInit, OnInit {
     this.startTimer();
   }
 
+  // Add to component properties
+  currentPrice: number = 0;
+
+  // Update ngOnInit
   ngOnInit() {
     this.chartService.toolCallComplete$.subscribe(result => {
       if (result.action === 'update_chart') {
         this.showChart = true;
         this.resetTimer();
+      } else if (result.action === 'update_price') {
+        this.currentPrice = result.value;
       }
     });
   }

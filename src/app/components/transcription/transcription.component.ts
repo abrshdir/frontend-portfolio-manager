@@ -8,6 +8,7 @@ import { TradingViewChartComponent } from '../trading-view-chart/trading-view-ch
 import { ErrorHandlerService } from '../../services/error-handler.service';
 import { ChartService } from '../../services/chart.service';
 import { ToolCallService } from '../../services/tool-call.service';
+import { ToastrService } from 'ngx-toastr'; // Add this import
 
 @Component({
     selector: 'app-transcription',
@@ -81,7 +82,8 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
         private ngZone: NgZone,
         private errorHandler: ErrorHandlerService,
         private chartService: ChartService,  // Already injected
-        private toolCallService: ToolCallService
+        private toolCallService: ToolCallService,
+        private toastr: ToastrService // Add ToastrService
     ) { }
 
     // Getter and setter for uiState to maintain compatibility
@@ -240,6 +242,7 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
         this.animationId = requestAnimationFrame(() => this.draw());
     }
 
+    // In startRecording() method:
     async startRecording(): Promise<void> {
         this.isRecording = true;
         this.transcription = '';
@@ -254,6 +257,12 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
             const sessionData = await this.realtimeService.getSession().toPromise();
             const EPHEMERAL_KEY = sessionData.client_secret.value;
             this.sessionInfo = sessionData;
+
+            // Immediately trigger session creation
+            this.handleRealtimeEvent({
+                type: 'session.created',
+                session: sessionData
+            });
 
             // Create WebRTC peer connection
             this.peerConnection = new RTCPeerConnection();
@@ -301,111 +310,107 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
             };
             await this.peerConnection.setRemoteDescription(answer as RTCSessionDescriptionInit);
             this.uiState = 'idle';
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error initializing WebRTC:', error);
             this.isRecording = false;
             this.uiState = 'idle';
             this.micPermissionGranted = false;  // Ensure permission flag is updated
+            // Add toastr error notification
+            this.toastr.error('Failed to initialize recording, did you set openai Api-key on?', 'Recording Error');
         }
     }
 
-    // Modify the existing handleRealtimeEvent
-    handleRealtimeEvent(realtimeEvent: any) {
-        try {
-            // Handle different event types based on their type
-            switch (realtimeEvent.type) {
-                case 'session.created':
-                    this.conversation.push(
-                        { type: 'assistant', text: 'Hello! How can I help you manage your crypto portfolio?' },
-                    )
-                    break;
+    handleRealtimeEvent(event: any) {
+        switch (event.type) {
+            case 'session.created':
+                this.conversation.push(
+                    { type: 'assistant', text: 'Hello! How can I help you manage your crypto portfolio?' },
+                )
+                break;
 
-                case 'conversation.item.input_audio_transcription.completed':
-                    this.transcription += realtimeEvent.transcription;
-                    this.conversation.push({
-                        type: 'user',
-                        text: this.transcription
-                    });
-                    break;
+            case 'conversation.item.input_audio_transcription.completed':
+                this.conversation.push({
+                    type: 'user',
+                    text: event.transcript
+                });
+                break;
 
-                case 'session.updated':
-                    this.sessionInfo = realtimeEvent.session;
-                    break;
+            case 'session.updated':
+                this.sessionInfo = event.session;
+                break;
 
-                case 'input_audio_buffer.speech_started':
-                    this.uiState = 'listening';
-                    // Clear the transcription when user starts speaking
-                    this.transcription = '';
-                    break;
+            case 'input_audio_buffer.speech_started':
+                this.uiState = 'listening';
+                // Clear the transcription when user starts speaking
+                this.transcription = '';
+                break;
 
-                case 'response.created':
-                    // AI is about to respond
-                    this.uiState = 'processing';
-                    break;
+            case 'response.created':
+                // AI is about to respond
+                this.uiState = 'processing';
+                break;
 
-                case 'response.output_item.added':
-                    // AI is speaking
-                    this.uiState = 'speaking';
-                    this.audioVisualizerActive = true;
-                    // Clear the transcription for the AI's response
-                    this.transcription = '';
-                    break;
+            case 'response.output_item.added':
+                // AI is speaking
+                this.uiState = 'speaking';
+                this.audioVisualizerActive = true;
+                // Clear the transcription for the AI's response
+                this.transcription = '';
+                break;
 
-                case 'output_audio_buffer.stopped':
-                    // Create a new conversation entry when audio output stops
-                    if (this.conversation.length > 0 &&
-                        this.conversation[this.conversation.length - 1].type === 'assistant' &&
-                        this.transcription.trim() !== '') {
-                        // Store the current transcription text
-                        const currentText = this.transcription;
-                        // Clear the transcription
-                        this.transcription = '';
-                        // Add a new assistant message with the current text
-                        this.conversation.push({
-                            type: 'assistant',
-                            text: currentText
-                        });
-                    }
-                    break;
+            case 'response.function_call_arguments.done':
+                try {
+                    const args = JSON.parse(event.arguments);
+                    this.handleFunctionCall(
+                        event.name,
+                        args,
+                        event.call_id
+                    );
+                } catch (error) {
+                    console.error('Error handling function arguments:', error);
+                    this.toastr.error('Failed to process function call', 'Execution Error');
+                }
+                break;
 
-                case 'response.completed':
-                    this.uiState = 'idle';
-                    this.audioVisualizerActive = false;
-                    break;
+            case 'response.audio_transcript.done':
+                this.conversation.push({
+                    type: 'assistant',
+                    text: event.transcript
+                });
+                break;
 
-                case 'response.audio_transcript.delta':
-                    this.transcribe(realtimeEvent);
-                    break;
-
-                case 'response.done':
-                    // Handle function calls from the response
-                    realtimeEvent.response.output?.forEach(async (outputItem: any) => {
-                        if (outputItem.type === 'function_call') {
-                            try {
-                                const args = JSON.parse(outputItem.arguments);
-                                await this.handleFunctionCall(
-                                    outputItem.name,
-                                    args,
-                                    outputItem.call_id
-                                );
-                            } catch (error) {
-                                console.error('Error handling function call:', error);
-                            }
+            case 'response.done':
+                // Handle function calls from the response
+                event.response.output?.forEach(async (outputItem: any) => {
+                    if (outputItem.type === 'function_call') {
+                        try {
+                            const args = JSON.parse(outputItem.arguments);
+                            await this.handleFunctionCall(
+                                outputItem.name,
+                                args,
+                                outputItem.call_id
+                            );
+                        } catch (error) {
+                            console.error('Error handling function call:', error);
                         }
-                    });
-                    break;
+                    }
+                });
+                break;
 
-                default:
-                    console.log('Unhandled event type:', realtimeEvent.type);
-            }
-        } catch (error) {
-            console.error('Error handling realtime event:', error);
+            case 'error':
+                console.error('Realtime Error:', event.error);
+                this.toastr.error(
+                    `API Error: ${event.error.message}`,
+                    'Session Error'
+                );
+                this.stopRecording();
+                break;
+
+            default:
+                console.log('Unhandled event type:', event.type);
         }
     }
-
-
     // Add new method to handle function calls
-    // Update the handleFunctionCall method to use the data channel directly
     private async handleFunctionCall(name: string, args: any, callId: string) {
         try {
             const result = await this.realtimeService.callFunction(name, args, callId).toPromise();
@@ -419,93 +424,41 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
             if (this.dataChannel && this.dataChannel.readyState === 'open') {
                 const functionResultEvent = {
                     type: "session.update",
-                    function_call: {
-                        id: callId,
-                        name: name,
-                        content: JSON.stringify(result)
+                    item: {
+                        type: "function_call_output",
+                        call_id: callId,
+                        content: { "role": "user", "content": `Here is the result. ${JSON.stringify(result)}` },
+                        output: JSON.stringify(result)
                     }
                 };
 
                 this.dataChannel.send(JSON.stringify(functionResultEvent));
                 console.log('Function result sent via data channel:', functionResultEvent);
-
-                // Continue the conversation after sending the result
-                this.dataChannel.send(JSON.stringify({
-                    type: "response.create"
-                }));
             } else {
                 console.error('Data channel not available or not open');
             }
+
         } catch (error: any) {
             console.error('Function call failed:', error);
+            // Add toastr error notification
+            this.toastr.error(error.message || 'Function execution failed', `Function Error: ${name}`);
 
             // Send error result through data channel
             if (this.dataChannel && this.dataChannel.readyState === 'open') {
                 const errorResultEvent = {
                     type: "session.update",
-                    function_call: {
-                        id: callId,
-                        name: name,
-                        content: JSON.stringify({
+                    item: {
+                        type: "function_call_output",
+                        call_id: callId,
+                        output: JSON.stringify({
                             status: 'error',
                             message: error.message || 'Function execution failed'
-                        })
+                        }),
                     }
                 };
 
                 this.dataChannel.send(JSON.stringify(errorResultEvent));
             }
-        }
-    }
-
-    transcribe(realtimeEvent: any) {
-        try {
-            this.ngZone.run(() => {
-                // Add to the transcription string
-                this.transcription += realtimeEvent.delta;
-
-                // Check if we need to add a new user message to the conversation
-                if (this.uiState === 'listening' && realtimeEvent.delta.trim() !== '') {
-                    // If we're in listening state and there's no user message yet or the last message is from assistant
-                    if (this.conversation.length === 0 || this.conversation[this.conversation.length - 1].type !== 'user') {
-                        // Add a new user message with "Recording..." text
-                        this.conversation.push({
-                            type: 'user',
-                            text: 'Recording...'
-                        });
-                    }
-                    // Update the last user message with the current transcription
-                    if (this.conversation[this.conversation.length - 1].type === 'user') {
-                        this.conversation[this.conversation.length - 1].text = this.transcription;
-                    }
-                }
-
-                // Handle AI responses
-                if (this.uiState === 'speaking' && realtimeEvent.delta.trim() !== '') {
-                    // If there's no assistant message yet or the last message is from user
-                    if (this.conversation.length === 0 || this.conversation[this.conversation.length - 1].type !== 'assistant') {
-                        // Add a new assistant message
-                        this.conversation.push({
-                            type: 'assistant',
-                            text: realtimeEvent.delta
-                        });
-                    } else {
-                        // Update the last assistant message
-                        this.conversation[this.conversation.length - 1].text += realtimeEvent.delta;
-                    }
-                }
-
-                // Scroll to bottom of transcription container
-                setTimeout(() => {
-                    if (this.transcriptionContainer) {
-                        const element = this.transcriptionContainer.nativeElement;
-                        element.scrollTop = element.scrollHeight;
-                    }
-                }, 0);
-            });
-        }
-        catch (error) {
-            console.error('Error transcribing:', error);
         }
     }
 
@@ -528,8 +481,12 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
 
                 this.visualizerData = new Uint8Array(this.analyser.frequencyBinCount);
 
-            } catch (error) {
+            } catch (error: any) {
                 console.error('Error setting up audio visualizer:', error);
+                // Run inside NgZone to update UI
+                this.ngZone.run(() => {
+                    this.toastr.error(error.message || 'Failed to setup audio visualizer', 'Visualizer Error');
+                });
             }
         });
     }
@@ -543,6 +500,8 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
         } catch (err) {
             this.micPermissionGranted = false;
             console.error('Microphone permission denied:', err);
+            // Add toastr error notification
+            this.toastr.error('Microphone access denied. Please enable microphone permissions.', 'Permission Error');
         }
     }
 

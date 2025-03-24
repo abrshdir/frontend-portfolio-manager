@@ -7,7 +7,7 @@ import { catchError } from 'rxjs/operators';
     providedIn: 'root'
 })
 export class RealtimeService {
-    private apiUrl = 'http://localhost:3000/realtime';
+    private apiUrl = 'https://backend-portfolio-manager.onrender.com/realtime';
 
     constructor(private http: HttpClient) {
     }
@@ -46,21 +46,6 @@ export class RealtimeService {
             throw new Error('Failed to fetch price data');
         }
     }
-
-    // // Add to RealtimeService class
-    // async submitFunctionResult(resultData: {
-    //     call_id: string;
-    //     name: string;
-    //     content: string;
-    // }): Promise<any> {
-    //     return this.http.post(`${this.apiUrl}/submit-function-result`, resultData)
-    //         .pipe(
-    //             catchError(error => {
-    //                 console.error('Failed to submit function result:', error);
-    //                 return throwError(() => new Error('Failed to submit function result'));
-    //             })
-    //         ).toPromise();
-    // }
 
     callFunction(name: string, args: any, callId: string) {
         return this.http.post(`${this.apiUrl}/execute-function`, {

@@ -1,15 +1,34 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom, lastValueFrom, Observable, throwError } from 'rxjs';
-import { catchError } from 'rxjs/operators';
+import { catchError, tap } from 'rxjs/operators';
 
 @Injectable({
     providedIn: 'root'
 })
 export class RealtimeService {
-    private apiUrl = 'https://backend-portfolio-manager.onrender.com/realtime';
+    private apiUrl = 'http://localhost:3000/api/realtime';
+    private apiUrl2 = 'http://localhost:3000/api/demo-account';
 
-    constructor(private http: HttpClient) {
+    // Remove the hardcoded demoAccount
+    constructor(private http: HttpClient) { }
+
+    // Update setup method to use backend-generated account
+    setupDemoAccount(): Observable<any> {
+        return this.http.post(`${this.apiUrl2}/`, {}).pipe( // Empty payload
+            tap((response: any) => {
+                localStorage.setItem('portfolioUserId', response._id);
+            }),
+            catchError(error => {
+                console.error('Error setting up demo account:', error);
+                return throwError(() => new Error('Failed to initialize demo account'));
+            })
+        );
+    }
+
+    // Add method to retrieve stored ID
+    getStoredUserId(): string | null {
+        return localStorage.getItem('portfolioUserId');
     }
 
     getSession(): Observable<any> {
@@ -53,5 +72,23 @@ export class RealtimeService {
             args,
             callId
         });
+    }
+
+    getDemoAccount(userId: string): Observable<any> {
+        return this.http.get(`${this.apiUrl2}/user/${userId}`);  // 👈 Add /user/ path segment
+    }
+
+    // Add this new method
+    submitFunctionResult(callId: string, name: string, result: any): Observable<any> {
+        return this.http.post(`${this.apiUrl}/submit-function-result`, {
+            callId,
+            name,
+            result
+        }).pipe(
+            catchError(error => {
+                console.error('Error submitting function result:', error);
+                return throwError(() => new Error('Failed to submit function result'));
+            })
+        );
     }
 }

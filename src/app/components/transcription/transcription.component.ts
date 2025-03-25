@@ -72,6 +72,9 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
     private animationId: number = 0;
     private rotation: number = 0;
 
+    // Add to your component class:
+    private heartbeatInterval: any;
+    private lastActivity = Date.now();
     isRecording: boolean = false;
     conversation = [
         { type: 'assistant', text: 'Welcome to Ai realtime portfolio manager!' },
@@ -168,6 +171,7 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
     }
 
     async toggleRecording() {
+        if (this.isProcessing) return; // Prevent mid-response interruption
         if (!this.isRecording) {
             await this.startRecording();
         } else {
@@ -176,21 +180,25 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
     }
 
     private stopRecording() {
-        if (this.mediaStream) {
-            this.mediaStream.getTracks().forEach(track => track.stop());
-            this.mediaStream = null;
+        this.isRecording = false;
+
+        // Properly close the data channel
+        if (this.dataChannel) {
+            this.dataChannel.onerror = null;
+            this.dataChannel.onclose = null;
+            if (this.dataChannel.readyState !== 'closed') {
+                this.dataChannel.close();
+            }
+            this.dataChannel = null;
         }
-        if (this.audioContext) {
-            this.audioContext.close();
-            this.audioContext = null;
-        }
+
+        // Properly close peer connection
         if (this.peerConnection) {
-            this.peerConnection.close();
+            this.peerConnection.oniceconnectionstatechange = null;
             this.peerConnection = null;
         }
-        this.isRecording = false;
-        cancelAnimationFrame(this.animationId);
-        this.drawInitialCircles();
+
+        // ... rest of your existing stopRecording code ...
     }
 
     private draw() {
@@ -243,6 +251,12 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
     }
 
     // In startRecording() method:
+    // Add this getter to check ID existence
+    get hasUserId(): boolean {
+        return !!localStorage.getItem('portfolioUserId') || !!sessionStorage.getItem('portfolioUserId');
+    }
+
+    // Update existing methods to handle disabled state
     async startRecording(): Promise<void> {
         this.isRecording = true;
         this.transcription = '';
@@ -321,6 +335,7 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
     }
 
     handleRealtimeEvent(event: any) {
+        this.lastActivity = Date.now(); // Reset timer on any event
         switch (event.type) {
             case 'session.created':
                 this.conversation.push(
@@ -358,6 +373,13 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
                 this.transcription = '';
                 break;
 
+            case 'response.output_item.done':
+                if (event.item.type === 'function_call') {
+                    console.log('Function call completed:', event.item);
+                    // No need to do anything here, just acknowledge
+                }
+                break;
+
             case 'response.function_call_arguments.done':
                 try {
                     const args = JSON.parse(event.arguments);
@@ -379,24 +401,6 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
                 });
                 break;
 
-            case 'response.done':
-                // Handle function calls from the response
-                event.response.output?.forEach(async (outputItem: any) => {
-                    if (outputItem.type === 'function_call') {
-                        try {
-                            const args = JSON.parse(outputItem.arguments);
-                            await this.handleFunctionCall(
-                                outputItem.name,
-                                args,
-                                outputItem.call_id
-                            );
-                        } catch (error) {
-                            console.error('Error handling function call:', error);
-                        }
-                    }
-                });
-                break;
-
             case 'error':
                 console.error('Realtime Error:', event.error);
                 this.toastr.error(
@@ -411,9 +415,19 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
         }
     }
     // Add new method to handle function calls
+    // Then modify your handleFunctionCall to use this EXACT format:
     private async handleFunctionCall(name: string, args: any, callId: string) {
         try {
-            const result = await this.realtimeService.callFunction(name, args, callId).toPromise();
+            // Automatically inject user ID from storage
+            const userId = localStorage.getItem('portfolioUserId') || sessionStorage.getItem('portfolioUserId');
+            if (!userId) {
+                throw new Error('User session not found');
+            }
+
+            // Clone and modify arguments
+            const finalArgs = { ...args, userId };
+
+            const result = await this.realtimeService.callFunction(name, finalArgs, callId).toPromise();
 
             // Notify chart service if this is a chart update
             if (result && (result as any).action === 'update_chart') {
@@ -425,20 +439,26 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
                 });
             }
 
-            // Send function result directly through the data channel
+            // Remove the data channel sending code and replace with:
+            // console.log('Function result submitted via service:', result);
             if (this.dataChannel && this.dataChannel.readyState === 'open') {
                 const functionResultEvent = {
                     type: "conversation.item.create",
                     item: {
                         type: "function_call_output",
                         call_id: callId,
-                        content: { "role": "user", "content": `Here is the result. ${JSON.stringify(result)}` },
                         output: JSON.stringify(result)
                     }
                 };
 
                 this.dataChannel.send(JSON.stringify(functionResultEvent));
-                console.log('Function result sent via data channel:', functionResultEvent);
+                this.dataChannel.send(JSON.stringify(
+                    {
+                        "type": "response.create"
+                    }
+                ));
+
+                //     console.log('Function result sent via data channel:', functionResultEvent);
             } else {
                 console.error('Data channel not available or not open');
             }
@@ -448,22 +468,6 @@ export class TranscriptionComponent implements OnInit, OnDestroy {
             // Add toastr error notification
             this.toastr.error(error.message || 'Function execution failed', `Function Error: ${name}`);
 
-            // Send error result through data channel
-            if (this.dataChannel && this.dataChannel.readyState === 'open') {
-                const errorResultEvent = {
-                    type: "conversation.item.create",
-                    item: {
-                        type: "function_call_output",
-                        call_id: callId,
-                        output: JSON.stringify({
-                            status: 'error',
-                            message: error.message || 'Function execution failed'
-                        }),
-                    }
-                };
-
-                this.dataChannel.send(JSON.stringify(errorResultEvent));
-            }
         }
     }
 

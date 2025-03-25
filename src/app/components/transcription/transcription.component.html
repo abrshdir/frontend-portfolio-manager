@@ -25,7 +25,7 @@
                     [class.animate-pulse]="isRecording"></div>
 
                 <!-- Particle System -->
-                <div *ngIf="isRecording" class="absolute -inset-16">
+                <div *ngIf="isRecording && hasUserId" class="absolute -inset-16">
                     <div *ngFor="let particle of particles" [style.left.%]="particle.x" [style.top.%]="particle.y"
                         [style.animation-duration]="particle.duration + 's'"
                         class="absolute w-1 h-1 bg-purple-400 rounded-full animate-float">
@@ -33,7 +33,7 @@
                 </div>
 
                 <!-- Microphone Button -->
-                <button (click)="toggleRecording()" [@pulseAnimation]="isRecording" [class]="isRecording ? 'bg-gradient-to-r from-purple-500 to-blue-500 shadow-lg shadow-purple-500/50' 
+                <button (click)="toggleRecording()" [disabled]="!hasUserId" [@pulseAnimation]="isRecording" [class]="isRecording ? 'bg-gradient-to-r from-purple-500 to-blue-500 shadow-lg shadow-purple-500/50' 
                     : isProcessing ? 'bg-gradient-to-r from-blue-500 to-green-500 shadow-lg shadow-blue-500/50' 
                     : 'bg-gray-700'" [disabled]="isProcessing"
                     class="relative z-10 p-6 rounded-full transition-all duration-300 hover:scale-105">

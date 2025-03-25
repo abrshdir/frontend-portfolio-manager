@@ -64,7 +64,9 @@ import { RealtimeService } from '../../services/realtime.service';
 export class DashboardComponent implements AfterViewInit, OnInit {
   // Add {static: false} and safe navigation operator
   @ViewChild(TradingViewChartComponent, { static: false }) chartComponent?: TradingViewChartComponent;
-  constructor(private chartService: ChartService) { }
+  constructor(private chartService: ChartService) {
+    // localStorage.setItem('portfolioUserId', '67e1c12c0cdec45a28d1c871');
+  }
   ngAfterViewInit() {
     // Add null check and setTimeout to ensure component exists
     setTimeout(() => {

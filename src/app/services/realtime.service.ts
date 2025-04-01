@@ -7,8 +7,8 @@ import { catchError, tap } from 'rxjs/operators';
     providedIn: 'root'
 })
 export class RealtimeService {
-    private apiUrl = 'https://backend-portfolio-manager.onrender.com/api/realtime';
-    private apiUrl2 = 'https://backend-portfolio-manager.onrender.com/api/demo-account';
+    private apiUrl = 'http://67.205.191.98:3000/api/realtime';
+    private apiUrl2 = 'http://67.205.191.98:3000/api/demo-account';
 
     // Remove the hardcoded demoAccount
     constructor(private http: HttpClient) { }

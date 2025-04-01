@@ -7,8 +7,8 @@ import { catchError, tap } from 'rxjs/operators';
     providedIn: 'root'
 })
 export class RealtimeService {
-    private apiUrl = 'https://67.205.191.98:3000/api/realtime';
-    private apiUrl2 = 'https://67.205.191.98:3000/api/demo-account';
+    private apiUrl = 'https://vps.victorytech.org/api/realtime';
+    private apiUrl2 = 'https://vps.victorytech.org/api/demo-account';
 
     // Remove the hardcoded demoAccount
     constructor(private http: HttpClient) { }
